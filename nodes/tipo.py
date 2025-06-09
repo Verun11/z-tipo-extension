@@ -60,7 +60,7 @@ re_attention = re.compile(
 re_break = re.compile(r"\s*\bBREAK\b\s*", re.S)
 
 
-def parse_prompt_attention(text):
+def parse_prompt_attention(text, ignore_first_n_tags: int = 0):
     """
     Parses a string with attention tokens and returns a list of pairs: text and its associated weight.
     Accepted tokens are:
@@ -95,6 +95,25 @@ def parse_prompt_attention(text):
      ['sky', 1.4641000000000006],
      ['.', 1.1]]
     """
+
+    if ignore_first_n_tags > 0:
+        if "," in text:
+            tags_list = text.split(",", ignore_first_n_tags)
+            if len(tags_list) > ignore_first_n_tags:
+                text = tags_list[-1].lstrip() # Process the remainder of the string
+            else:
+                text = "" # Not enough segments to ignore, process empty
+        elif not text.strip(): # if text is empty or whitespace
+            text = ""
+        else: # Text does not contain commas, but we need to ignore tags
+              # This case implies if ignore_first_n_tags is e.g. 1 and text is "single_tag"
+              # then the single_tag should be ignored.
+            # However, the current split logic only works if there are commas.
+            # A simple approach: if no commas and ignore_first_n_tags > 0, treat as if all tags ignored.
+            # This might need refinement based on desired behavior for single tags without commas.
+            # For now, if ignore_first_n_tags >= 1 and no comma, assume the intent is to clear the text.
+            text = ""
+
 
     res = []
     round_brackets = []
@@ -270,9 +289,9 @@ class TIPO:
             current_model = (tipo_model, device)
         aspect_ratio = width / height
         prompt_without_extranet = tags
-        prompt_parse_strength = parse_prompt_attention(prompt_without_extranet)
+        prompt_parse_strength = parse_prompt_attention(prompt_without_extranet, ignore_first_n_tags=0)
 
-        nl_prompt_parse_strength = parse_prompt_attention(nl_prompt)
+        nl_prompt_parse_strength = parse_prompt_attention(nl_prompt, ignore_first_n_tags=0) # NL prompt likely doesn't need tag ignoring
         nl_prompt = ""
         strength_map_nl = []
         for part, strength in nl_prompt_parse_strength:
@@ -440,10 +459,10 @@ class TIPOOperation:
             current_model = (tipo_model, device)
         aspect_ratio = width / height
         prompt_without_extranet = tags
-        prompt_parse_strength = parse_prompt_attention(prompt_without_extranet)
+        prompt_parse_strength = parse_prompt_attention(prompt_without_extranet, ignore_first_n_tags=0)
 
         nl_prompt_wihtout_extranet = nl_prompt
-        nl_prompt_parse_strength = parse_prompt_attention(nl_prompt)
+        nl_prompt_parse_strength = parse_prompt_attention(nl_prompt, ignore_first_n_tags=0) # NL prompt likely doesn't need tag ignoring
         nl_prompt = ""
         strength_map_nl = []
         for part, strength in nl_prompt_parse_strength:
@@ -560,9 +579,9 @@ class TIPOFormat:
         tag_map = full_output
 
         prompt_without_extranet = tags
-        prompt_parse_strength = parse_prompt_attention(prompt_without_extranet)
+        prompt_parse_strength = parse_prompt_attention(prompt_without_extranet, ignore_first_n_tags=0)
 
-        nl_prompt_parse_strength = parse_prompt_attention(nl_prompt)
+        nl_prompt_parse_strength = parse_prompt_attention(nl_prompt, ignore_first_n_tags=0) # NL prompt likely doesn't need tag ignoring
         nl_prompt = ""
         strength_map_nl = []
         for part, strength in nl_prompt_parse_strength:

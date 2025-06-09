@@ -12,13 +12,14 @@ import torch
 import gradio as gr
 
 import modules.scripts as scripts
+import re # Needed for the new parser function
 from modules import devices, shared, options
 from modules.scripts import basedir, OnComponent
 from modules.processing import (
     StableDiffusionProcessingTxt2Img,
     StableDiffusionProcessingImg2Img,
 )
-from modules.prompt_parser import parse_prompt_attention
+# from modules.prompt_parser import parse_prompt_attention # Keep for now, ensure calls are specific
 from modules.extra_networks import parse_prompt
 from modules.shared import opts
 
@@ -336,6 +337,13 @@ class TIPOScript(scripts.Script):
                                 step=1,
                                 value=80,
                             )
+                            ignore_first_n_tags_slider = gr.Slider(
+                                label="Ignore First N Tags",
+                                minimum=0,
+                                maximum=50,
+                                step=1,
+                                value=0,
+                            )
 
         aspect_ratio_place_holder = gr.Number(value=1.0, visible=False)
 
@@ -354,6 +362,7 @@ class TIPOScript(scripts.Script):
                 temperature_slider,
                 top_p_slider,
                 top_k_slider,
+                ignore_first_n_tags_slider,
                 model_dropdown,
                 gguf_use_cpu,
                 no_formatting,
@@ -395,6 +404,7 @@ class TIPOScript(scripts.Script):
             (temperature_slider, lambda d: self.get_infotext(d, "temperature", None)),
             (top_p_slider, lambda d: self.get_infotext(d, "top_p", None)),
             (top_k_slider, lambda d: self.get_infotext(d, "top_k", None)),
+            (ignore_first_n_tags_slider, lambda d: self.get_infotext(d, "ignore_first_n_tags", 0)),
             (
                 model_dropdown,
                 lambda d: self.get_infotext(d, "model", None),
@@ -415,6 +425,7 @@ class TIPOScript(scripts.Script):
             temperature_slider,
             top_p_slider,
             top_k_slider,
+            ignore_first_n_tags_slider,
             model_dropdown,
             gguf_use_cpu,
             no_formatting,
@@ -445,16 +456,18 @@ class TIPOScript(scripts.Script):
                 "temperature": args[5],
                 "top_p": args[6],
                 "top_k": args[7],
-                "model": args[8],
-                "gguf_cpu": args[9],
-                "no_formatting": args[10],
+                "ignore_first_n_tags": args[8],
+                "model": args[9],
+                "gguf_cpu": args[10],
+                "no_formatting": args[11],
             },
             ensure_ascii=False,
         ).translate(QUOTESWAP)
         p.extra_generation_params[INFOTEXT_KEY_PROMPT] = prompt.strip() or args[-1]
         p.extra_generation_params[INFOTEXT_NL_PROMPT] = args[-2]
-        if args[3] != DEFAULT_FORMAT:
-            p.extra_generation_params[INFOTEXT_KEY_FORMAT] = args[3]
+        # If format_selected (args[3]) is "custom", save the custom format text (args[4])
+        if args[3] == "custom":
+            p.extra_generation_params[INFOTEXT_KEY_FORMAT] = args[4]
 
     def process(
         self,
@@ -557,6 +570,7 @@ class TIPOScript(scripts.Script):
         temperature: float,
         top_p: float,
         top_k: int,
+        ignore_first_n_tags: int,
         model: str,
         gguf_use_cpu: bool,
         no_formatting: bool,
@@ -580,12 +594,34 @@ class TIPOScript(scripts.Script):
         prompt_preview = prompt.replace("\n", " ")[:40]
         logger.info(f"Processing prompt: {prompt_preview}...")
         logger.info(f"Processing with seed: {seed}")
-        prompt_without_extranet, res = parse_prompt(prompt)
-        prompt_parse_strength = parse_prompt_attention(prompt_without_extranet)
+        prompt_without_extranet, res = parse_prompt(prompt) # This is from extra_networks, not the attention parser
 
-        nl_prompt_parse_strength = parse_prompt_attention(nl_prompt)
-        nl_prompt = ""
+        # Use the local parse_prompt_attention for the main prompt
+        prompt_parse_strength = _local_parse_prompt_attention(prompt_without_extranet, ignore_first_n_tags)
+
+        # For NL prompt, also use local but with ignore_first_n_tags=0
+        # Assuming modules.prompt_parser.parse_prompt_attention is still the one for nl_prompt if not using local.
+        # To be safe and consistent, let's use the local one here too with 0.
+        nl_prompt_parse_strength = _local_parse_prompt_attention(nl_prompt, 0)
+        nl_prompt_processed_text = "" # Store the text part from nl_prompt_parse_strength
         strength_map_nl = []
+        for part, strength in nl_prompt_parse_strength:
+            nl_prompt_processed_text += part
+            if strength == 1:
+                continue
+            strength_map_nl.append((part, strength))
+        # The original nl_prompt is used later in parse_tipo_request, so we update it here
+        # if it was modified by parse_attention (e.g. stripped of attention syntax)
+        nl_prompt = nl_prompt_processed_text
+
+
+        # Ensure the original nl_prompt (which might be just text without attention) is used below if needed
+        # The variable `nl_prompt` is reassigned later by `parse_tipo_request`.
+        # The `nl_prompt_parse_strength` is used to build `strength_map_nl`.
+        # The text part of `nl_prompt` used in `parse_tipo_request` should be the one without attention syntax.
+        # The current logic for nl_prompt seems to reconstruct it from parsed parts.
+
+        black_list = [tag.strip() for tag in ban_tags.split(",") if tag.strip()]
         for part, strength in nl_prompt_parse_strength:
             nl_prompt += part
             if strength == 1:
@@ -687,6 +723,79 @@ def parse_infotext(_, params):
     except Exception:
         pass
 
+
+# Definition of the local parser function, copied and adapted from nodes/tipo.py
+# Added re import at the top of the file.
+# Added _local_ prefix to avoid potential conflicts if original import is still used elsewhere.
+_re_attention_scripts = re.compile(
+    r"\\\(|\\\)|\\\[|\\]|\\\\|\\|\(|\[|:\s*([+-]?[.\d]+)\s*\)|\)|\]|[^\\()\[\]:]+|:",
+    re.X,
+)
+_re_break_scripts = re.compile(r"\s*\bBREAK\b\s*", re.S)
+
+def _local_parse_prompt_attention(text, ignore_first_n_tags: int = 0):
+    if ignore_first_n_tags > 0:
+        if "," in text:
+            tags_list = text.split(",", ignore_first_n_tags)
+            if len(tags_list) > ignore_first_n_tags:
+                text = tags_list[-1].lstrip()
+            else:
+                text = ""
+        elif not text.strip():
+            text = ""
+        else:
+            text = ""
+
+    res = []
+    round_brackets = []
+    square_brackets = []
+    round_bracket_multiplier = 1.1
+    square_bracket_multiplier = 1 / 1.1
+
+    def multiply_range(start_position, multiplier):
+        for p in range(start_position, len(res)):
+            res[p][1] *= multiplier
+
+    for m in _re_attention_scripts.finditer(text):
+        text_segment = m.group(0)
+        weight = m.group(1)
+
+        if text_segment.startswith("\\"):
+            res.append([text_segment[1:], 1.0])
+        elif text_segment == "(":
+            round_brackets.append(len(res))
+        elif text_segment == "[":
+            square_brackets.append(len(res))
+        elif weight is not None and round_brackets: # Check round_brackets for safety, though finditer implies structure
+            multiply_range(round_brackets.pop(), float(weight))
+        elif text_segment == ")" and round_brackets:
+            multiply_range(round_brackets.pop(), round_bracket_multiplier)
+        elif text_segment == "]" and square_brackets:
+            multiply_range(square_brackets.pop(), square_bracket_multiplier)
+        else:
+            parts = re.split(_re_break_scripts, text_segment)
+            for i, part in enumerate(parts):
+                if i > 0:
+                    res.append(["BREAK", -1])
+                if part: # Ensure part is not empty before appending
+                    res.append([part, 1.0])
+
+    for pos in round_brackets:
+        multiply_range(pos, round_bracket_multiplier)
+    for pos in square_brackets:
+        multiply_range(pos, square_bracket_multiplier)
+
+    if not res: # Changed from len(res) == 0 to not res for conciseness
+        res = [["", 1.0]]
+
+    i = 0
+    while i + 1 < len(res):
+        if res[i][1] == res[i + 1][1] and res[i][0] is not None and res[i+1][0] is not None : # Ensure text parts are not None
+            res[i][0] += res[i + 1][0]
+            res.pop(i + 1)
+        else:
+            i += 1
+    return res
 
 scripts.script_callbacks.on_infotext_pasted(parse_infotext)
 
