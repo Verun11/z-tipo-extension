@@ -719,54 +719,147 @@ class TIPOScript(scripts.Script):
 
         org_tag_map = seperate_tags(all_tags)
 
-        meta, operations, general, nl_prompt = parse_tipo_request(
-            org_tag_map,
-            nl_prompt,
-            tag_length_target=effective_tag_length_target, # Use the determined target
-            nl_length_target=processed_nl_length, # Use processed NL length
-            generate_extra_nl_prompt=(not nl_prompt and "<|extended|>" in format)
-            or "<|generated|>" in format,
-        )
-        meta["aspect_ratio"] = f"{aspect_ratio:.1f}"
+        # Store the initial nl_prompt (text part, after attention stripping) for reuse in iterations
+        initial_nl_text_for_kgen = nl_prompt
 
-        if isinstance(models.text_model, torch.nn.Module):
-            models.text_model.to(devices.device)
-        tag_map, _ = tipo_runner(
-            meta,
-            operations,
-            general,
-            nl_prompt,
-            temperature=temperature,
-            top_p=top_p,
-            top_k=top_k,
-            seed=seed,
-        )
-        if isinstance(models.text_model, torch.nn.Module):
-            models.text_model.cpu()
-            devices.torch_gc()
+        MAX_ITERATIONS = 3
+        THRESHOLD_FOR_ITERATION = 72 # Max of "very_long" preset
 
-        addon = {
-            "tags": [],
-            "nl": "",
-        }
-        for cate in tag_map.keys():
-            if cate == "generated" and addon["nl"] == "":
-                addon["nl"] = tag_map[cate]
-                continue
-            if cate == "extended":
-                extended = tag_map[cate]
-                addon["nl"] = extended
-                continue
-            if cate not in org_tag_map:
-                continue
-            for tag in tag_map[cate]:
-                if tag in org_tag_map[cate]:
-                    continue
-                addon["tags"].append(tag)
+        if tag_length == "Custom" and min_tags > THRESHOLD_FOR_ITERATION:
+            logger.info(f"Starting iterative tag generation: min_tags={min_tags}, max_tags={max_tags}, target_preset={effective_tag_length_target}")
+            accumulated_tags_set = set()
+            final_addon_nl = ""
+            base_seed = seed
+
+            # This tag_map will be from the last iteration, used for formatted_prompt_by_tipo
+            # and potentially for apply_strength if not building a new one.
+            tag_map_from_last_run = {}
+
+            for i in range(MAX_ITERATIONS):
+                current_seed = base_seed + i
+                logger.info(f"Iteration {i+1}/{MAX_ITERATIONS}, current_seed={current_seed}")
+
+                # Use initial_nl_text_for_kgen for each call to parse_tipo_request
+                meta, operations, general, current_iter_nl_prompt = parse_tipo_request(
+                    org_tag_map, # Base user tags
+                    initial_nl_text_for_kgen, # Original NL prompt text
+                    tag_length_target=effective_tag_length_target,
+                    nl_length_target=processed_nl_length, # Use consistent NL length target
+                    generate_extra_nl_prompt=(not initial_nl_text_for_kgen and "<|extended|>" in format)
+                                           or "<|generated|>" in format,
+                )
+                meta["aspect_ratio"] = f"{aspect_ratio:.1f}"
+
+                if isinstance(models.text_model, torch.nn.Module):
+                    models.text_model.to(devices.device)
+
+                current_tag_map, _ = tipo_runner(
+                    meta,
+                    operations,
+                    general,
+                    current_iter_nl_prompt, # NL prompt from current parse_tipo_request
+                    temperature=temperature,
+                    top_p=top_p,
+                    top_k=top_k,
+                    seed=current_seed,
+                )
+                tag_map_from_last_run = current_tag_map # Keep the latest for formatted output
+
+                if isinstance(models.text_model, torch.nn.Module):
+                    models.text_model.cpu()
+                    devices.torch_gc()
+
+                # Tag Extraction for this iteration
+                iter_nl_content = ""
+                for cate, tags_or_str in current_tag_map.items():
+                    if isinstance(tags_or_str, str): # 'extended', 'generated'
+                        if cate == "extended": # Prioritize extended
+                            iter_nl_content = tags_or_str
+                            break
+                        elif cate == "generated" and not iter_nl_content: # Take generated if extended is not there or empty
+                            iter_nl_content = tags_or_str
+                    elif isinstance(tags_or_str, list):
+                        for tag_item in tags_or_str:
+                            # Check if tag is in org_tag_map for that category
+                            original_tags_in_category = org_tag_map.get(cate, [])
+                            if tag_item not in original_tags_in_category:
+                                accumulated_tags_set.add(tag_item)
+
+                if i == 0 and iter_nl_content: # Store NL from the first iteration only
+                    final_addon_nl = iter_nl_content
+
+                logger.info(f"Iteration {i+1}: accumulated_tags_set size = {len(accumulated_tags_set)}")
+                if len(accumulated_tags_set) >= min_tags:
+                    break
+
+            final_addon_tags_list = list(accumulated_tags_set)
+            if len(final_addon_tags_list) > max_tags:
+                logger.info(f"Truncating accumulated tags from {len(final_addon_tags_list)} to {max_tags}")
+                final_addon_tags_list = final_addon_tags_list[:max_tags]
+
+            addon = {"tags": final_addon_tags_list, "nl": final_addon_nl}
+            tag_map = tag_map_from_last_run # Use the tag_map from the last iteration for apply_format
+
+        else: # Single run logic (existing code, slightly restructured)
+            logger.info(f"Starting single run tag generation: target={effective_tag_length_target}")
+            meta, operations, general, current_nl_prompt_single_run = parse_tipo_request(
+                org_tag_map,
+                initial_nl_text_for_kgen, # Use initial NL text
+                tag_length_target=effective_tag_length_target,
+                nl_length_target=processed_nl_length,
+                generate_extra_nl_prompt=(not initial_nl_text_for_kgen and "<|extended|>" in format)
+                                       or "<|generated|>" in format,
+            )
+            meta["aspect_ratio"] = f"{aspect_ratio:.1f}"
+
+            if isinstance(models.text_model, torch.nn.Module):
+                models.text_model.to(devices.device)
+
+            # This is the main tag_map for single run
+            tag_map, _ = tipo_runner(
+                meta,
+                operations,
+                general,
+                current_nl_prompt_single_run, # NL prompt from this parse_tipo_request
+                temperature=temperature,
+                top_p=top_p,
+                top_k=top_k,
+                seed=seed,
+            )
+
+            if isinstance(models.text_model, torch.nn.Module):
+                models.text_model.cpu()
+                devices.torch_gc()
+
+            # Populate addon for single run
+            addon_tags_single_run = []
+            addon_nl_single_run = ""
+            temp_nl_holder = {"extended": "", "generated": ""}
+
+            for cate, tags_or_str in tag_map.items():
+                if isinstance(tags_or_str, str):
+                    if cate == "extended":
+                        temp_nl_holder["extended"] = tags_or_str
+                    elif cate == "generated":
+                        temp_nl_holder["generated"] = tags_or_str
+                elif isinstance(tags_or_str, list):
+                    original_tags_in_category = org_tag_map.get(cate, [])
+                    for tag_item in tags_or_str:
+                        if tag_item not in original_tags_in_category:
+                            addon_tags_single_run.append(tag_item)
+
+            addon_nl_single_run = temp_nl_holder["extended"] or temp_nl_holder["generated"]
+            addon = {"tags": addon_tags_single_run, "nl": addon_nl_single_run}
+
+        # Common downstream processing using the 'addon' dict and 'tag_map' (from last/only run)
         addon = apply_strength(addon, strength_map, strength_map_nl, break_map)
-        unformatted_prompt_by_tipo = (
+        unformatted_prompt_by_tipo = ( # This uses the (potentially large) accumulated list of tags
             prompt + ", " + ", ".join(addon["tags"]) + "\n" + addon["nl"]
         )
+
+        # This apply_strength uses the tag_map from the last/only run.
+        # For iterative mode, this means it won't reflect all accumulated tags if they were from different categories.
+        # This is a known simplification as per subtask description.
         tag_map = apply_strength(tag_map, strength_map, strength_map_nl, break_map)
         formatted_prompt_by_tipo = apply_format(tag_map, format).replace(
             "BREAK,", "BREAK"
