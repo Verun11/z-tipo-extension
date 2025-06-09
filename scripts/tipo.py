@@ -614,6 +614,8 @@ class TIPOScript(scripts.Script):
         no_formatting: bool, # no_formatting
         tag_prompt: str, # self.tag_prompt_area[is_img2img]
     ):
+        normalize_tag = lambda t: t.strip().lower()
+
         prompt = prompt.strip() or tag_prompt
         seed = int(seed) % SEED_MAX
         if model != self.current_model:
@@ -780,10 +782,10 @@ class TIPOScript(scripts.Script):
                         elif cate == "generated":
                             temp_generated_nl_this_iter = tags_or_str
                     elif isinstance(tags_or_str, list):
-                        original_tags_in_category = org_tag_map.get(cate, [])
+                        normalized_user_tags_for_category = {normalize_tag(t) for t in org_tag_map.get(cate, [])}
                         for tag_item in tags_or_str:
-                            if tag_item not in original_tags_in_category: # This filtering logic is correct
-                                accumulated_tags_set.add(tag_item)
+                            if normalize_tag(tag_item) not in normalized_user_tags_for_category:
+                                accumulated_tags_set.add(tag_item) # Add original tag_item
 
                 # Decide which NL content to use from this iteration's findings
                 # Store NL from the first iteration only, prioritize 'extended'
@@ -845,10 +847,10 @@ class TIPOScript(scripts.Script):
                     elif cate == "generated":
                         temp_nl_holder["generated"] = tags_or_str
                 elif isinstance(tags_or_str, list):
-                    original_tags_in_category = org_tag_map.get(cate, [])
+                    normalized_user_tags_for_category = {normalize_tag(t) for t in org_tag_map.get(cate, [])}
                     for tag_item in tags_or_str:
-                        if tag_item not in original_tags_in_category:
-                            addon_tags_single_run.append(tag_item)
+                        if normalize_tag(tag_item) not in normalized_user_tags_for_category:
+                            addon_tags_single_run.append(tag_item) # Add original tag_item
 
             addon_nl_single_run = temp_nl_holder["extended"] or temp_nl_holder["generated"]
             addon = {"tags": addon_tags_single_run, "nl": addon_nl_single_run}
