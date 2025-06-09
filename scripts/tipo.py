@@ -221,14 +221,31 @@ class TIPOScript(scripts.Script):
                                     outputs=self.prompt_area[is_img2img],
                                 )
 
+                            tag_length_choices = list(TOTAL_TAG_LENGTH.values()) + ["Custom"]
                             tag_length_radio = gr.Radio(
                                 label="Tags Length target",
-                                choices=list(TOTAL_TAG_LENGTH.values()),
+                                choices=tag_length_choices,
                                 value=TOTAL_TAG_LENGTH["LONG"],
+                            )
+                            min_tags_slider = gr.Slider(
+                                label="Min Custom Tag Amount",
+                                minimum=1,
+                                maximum=100,
+                                step=1,
+                                value=20,
+                                visible=False
+                            )
+                            max_tags_slider = gr.Slider(
+                                label="Max Custom Tag Amount",
+                                minimum=1,
+                                maximum=150,
+                                step=1,
+                                value=50,
+                                visible=False
                             )
                             nl_length_radio = gr.Radio(
                                 label="NL Length target",
-                                choices=list(TOTAL_TAG_LENGTH.values()),
+                                choices=list(TOTAL_TAG_LENGTH.values()), # Assuming NL length doesn't need custom for now
                                 value=TOTAL_TAG_LENGTH["LONG"],
                             )
                             ban_tags_textbox = gr.Textbox(
@@ -260,6 +277,16 @@ class TIPOScript(scripts.Script):
                                 ),
                                 inputs=format_dropdown,
                                 outputs=format_textarea,
+                            )
+
+                            def on_tag_length_change(choice):
+                                is_custom = choice == "Custom"
+                                return gr.update(visible=is_custom), gr.update(visible=is_custom)
+
+                            tag_length_radio.change(
+                                fn=on_tag_length_change,
+                                inputs=tag_length_radio,
+                                outputs=[min_tags_slider, max_tags_slider]
                             )
 
                             with gr.Group():
@@ -355,6 +382,8 @@ class TIPOScript(scripts.Script):
                 aspect_ratio_place_holder,
                 seed_num_input,
                 tag_length_radio,
+                min_tags_slider, # New
+                max_tags_slider, # New
                 nl_length_radio,
                 ban_tags_textbox,
                 format_dropdown,
@@ -390,10 +419,12 @@ class TIPOScript(scripts.Script):
             (orig_prompt_area, lambda d: d["Prompt"]),
             (enabled_check, lambda d: INFOTEXT_KEY in d),
             (seed_num_input, lambda d: self.get_infotext(d, "seed", None)),
-            (tag_length_radio, lambda d: self.get_infotext(d, "tag_length", None)),
-            (nl_length_radio, lambda d: self.get_infotext(d, "nl_length", None)),
+            (tag_length_radio, lambda d: self.get_infotext(d, "tag_length", TOTAL_TAG_LENGTH["LONG"])),
+            (min_tags_slider, lambda d: self.get_infotext(d, "min_custom_tags", 20)),
+            (max_tags_slider, lambda d: self.get_infotext(d, "max_custom_tags", 50)),
+            (nl_length_radio, lambda d: self.get_infotext(d, "nl_length", None)), # Default for this one if not found
             (ban_tags_textbox, lambda d: self.get_infotext(d, "ban_tags", None)),
-            (format_dropdown, lambda d: self.get_infotext(d, "format", None)),
+            (format_dropdown, lambda d: self.get_infotext(d, "format", None)), # Default for this one if not found
             (format_textarea, lambda d: d.get(INFOTEXT_KEY_FORMAT, None)),
             (
                 process_timing_dropdown,
@@ -418,6 +449,8 @@ class TIPOScript(scripts.Script):
             process_timing_dropdown,
             seed_num_input,
             tag_length_radio,
+            min_tags_slider, # New
+            max_tags_slider, # New
             nl_length_radio,
             ban_tags_textbox,
             format_dropdown,
@@ -448,26 +481,29 @@ class TIPOScript(scripts.Script):
             {
                 "seed": seed,
                 "timing": process_timing,
-                "tag_length": args[0],
-                "nl_length": args[1],
-                "ban_tags": args[2],
-                "format_selected": args[3],
-                "format": args[4],
-                "temperature": args[5],
-                "top_p": args[6],
-                "top_k": args[7],
-                "ignore_first_n_tags": args[8],
-                "model": args[9],
-                "gguf_cpu": args[10],
-                "no_formatting": args[11],
+                "tag_length": args[0], # tag_length_radio
+                "min_custom_tags": args[1], # min_tags_slider
+                "max_custom_tags": args[2], # max_tags_slider
+                "nl_length": args[3], # nl_length_radio
+                "ban_tags": args[4], # ban_tags_textbox
+                "format_selected": args[5], # format_dropdown
+                "format": args[6], # format_textarea
+                "temperature": args[7], # temperature_slider
+                "top_p": args[8], # top_p_slider
+                "top_k": args[9], # top_k_slider
+                "ignore_first_n_tags": args[10], # ignore_first_n_tags_slider
+                "model": args[11], # model_dropdown
+                "gguf_cpu": args[12], # gguf_use_cpu
+                "no_formatting": args[13], # no_formatting
             },
             ensure_ascii=False,
         ).translate(QUOTESWAP)
-        p.extra_generation_params[INFOTEXT_KEY_PROMPT] = prompt.strip() or args[-1]
-        p.extra_generation_params[INFOTEXT_NL_PROMPT] = args[-2]
-        # If format_selected (args[3]) is "custom", save the custom format text (args[4])
-        if args[3] == "custom":
-            p.extra_generation_params[INFOTEXT_KEY_FORMAT] = args[4]
+        p.extra_generation_params[INFOTEXT_KEY_PROMPT] = prompt.strip() or args[-1] # nl_prompt_area from UI
+        p.extra_generation_params[INFOTEXT_NL_PROMPT] = args[-2] # tag_prompt_area from UI
+
+        # If format_selected (args[5]) is "custom", save the custom format text (args[6])
+        if args[5] == "custom":
+            p.extra_generation_params[INFOTEXT_KEY_FORMAT] = args[6]
 
     def process(
         self,
@@ -562,19 +598,21 @@ class TIPOScript(scripts.Script):
         nl_prompt: str,
         aspect_ratio: float,
         seed: int,
-        tag_length: str,
-        nl_length: str,
-        ban_tags: str,
-        format_select: str,
-        format: str,
-        temperature: float,
-        top_p: float,
-        top_k: int,
-        ignore_first_n_tags: int,
-        model: str,
-        gguf_use_cpu: bool,
-        no_formatting: bool,
-        tag_prompt: str,
+        tag_length: str, # tag_length_radio value e.g. "very short" or "Custom"
+        min_tags: int,   # min_tags_slider value
+        max_tags: int,   # max_tags_slider value
+        nl_length: str,  # nl_length_radio
+        ban_tags: str,   # ban_tags_textbox
+        format_select: str, # format_dropdown
+        format: str,     # format_textarea
+        temperature: float, # temperature_slider
+        top_p: float,    # top_p_slider
+        top_k: int,      # top_k_slider
+        ignore_first_n_tags: int, # ignore_first_n_tags_slider
+        model: str,      # model_dropdown
+        gguf_use_cpu: bool, # gguf_use_cpu
+        no_formatting: bool, # no_formatting
+        tag_prompt: str, # self.tag_prompt_area[is_img2img]
     ):
         prompt = prompt.strip() or tag_prompt
         seed = int(seed) % SEED_MAX
@@ -650,15 +688,42 @@ class TIPOScript(scripts.Script):
             for tag in part_tags:
                 strength_map[tag] = strength
 
-        tag_length = tag_length.replace(" ", "_")
-        nl_length = nl_length.replace(" ", "_")
+        # Determine effective_tag_length_target
+        presets_mean_values = {
+            "very short": 11.5,  # Approx mean for "very short" (6-17 tags)
+            "short": 26.5,       # Approx mean for "short" (18-35 tags)
+            "long": 44.5,        # Approx mean for "long" (36-53 tags)
+            "very long": 63.5,   # Approx mean for "very long" (54-72 tags)
+        }
+
+        if tag_length == "Custom":
+            custom_target_mean = (min_tags + max_tags) / 2
+            # Find closest preset name based on mean values
+            # Note: TOTAL_TAG_LENGTH uses "VERY_SHORT" as key, presets_mean_values uses "very short"
+            # We need to map back to the keys kgen expects ("very_short", etc.)
+            # Or, ensure preset keys here are what kgen expects if direct mapping.
+            # The values from TOTAL_TAG_LENGTH are "very short", "short", etc.
+            # kgen expects "very_short", "short", "long", "very_long".
+
+            # Find the preset string (e.g., "very short") whose mean is closest
+            closest_preset_str_value = min(presets_mean_values.keys(), key=lambda k: abs(presets_mean_values[k] - custom_target_mean))
+            effective_tag_length_target = closest_preset_str_value # This will be like "very short"
+        else:
+            effective_tag_length_target = tag_length # This is already like "very short"
+
+        # Convert to kgen expected format (e.g., "very_short")
+        effective_tag_length_target = effective_tag_length_target.replace(" ", "_")
+
+        # NL length processing (remains unchanged)
+        processed_nl_length = nl_length.replace(" ", "_")
+
         org_tag_map = seperate_tags(all_tags)
 
         meta, operations, general, nl_prompt = parse_tipo_request(
             org_tag_map,
             nl_prompt,
-            tag_length_target=tag_length,
-            nl_length_target=nl_length,
+            tag_length_target=effective_tag_length_target, # Use the determined target
+            nl_length_target=processed_nl_length, # Use processed NL length
             generate_extra_nl_prompt=(not nl_prompt and "<|extended|>" in format)
             or "<|generated|>" in format,
         )
