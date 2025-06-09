@@ -770,23 +770,25 @@ class TIPOScript(scripts.Script):
                     devices.torch_gc()
 
                 # Tag Extraction for this iteration
-                iter_nl_content = ""
+                temp_extended_nl_this_iter = ""
+                temp_generated_nl_this_iter = ""
+
                 for cate, tags_or_str in current_tag_map.items():
                     if isinstance(tags_or_str, str): # 'extended', 'generated'
-                        if cate == "extended": # Prioritize extended
-                            iter_nl_content = tags_or_str
-                            break
-                        elif cate == "generated" and not iter_nl_content: # Take generated if extended is not there or empty
-                            iter_nl_content = tags_or_str
+                        if cate == "extended":
+                            temp_extended_nl_this_iter = tags_or_str
+                        elif cate == "generated":
+                            temp_generated_nl_this_iter = tags_or_str
                     elif isinstance(tags_or_str, list):
+                        original_tags_in_category = org_tag_map.get(cate, [])
                         for tag_item in tags_or_str:
-                            # Check if tag is in org_tag_map for that category
-                            original_tags_in_category = org_tag_map.get(cate, [])
-                            if tag_item not in original_tags_in_category:
+                            if tag_item not in original_tags_in_category: # This filtering logic is correct
                                 accumulated_tags_set.add(tag_item)
 
-                if i == 0 and iter_nl_content: # Store NL from the first iteration only
-                    final_addon_nl = iter_nl_content
+                # Decide which NL content to use from this iteration's findings
+                # Store NL from the first iteration only, prioritize 'extended'
+                if i == 0:
+                    final_addon_nl = temp_extended_nl_this_iter or temp_generated_nl_this_iter
 
                 logger.info(f"Iteration {i+1}: accumulated_tags_set size = {len(accumulated_tags_set)}")
                 if len(accumulated_tags_set) >= min_tags:
