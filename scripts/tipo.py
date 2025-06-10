@@ -615,6 +615,19 @@ class TIPOScript(scripts.Script):
         tag_prompt: str, # self.tag_prompt_area[is_img2img]
     ):
         normalize_tag = lambda t: t.strip().lower()
+        BANNED_STRING_TOKENS = {"<|very_long|>", "<|long|>", "<|short|>", "<|very_short|>"}
+
+        def is_numeric_only_string(s):
+            if not isinstance(s, str):
+                return False
+            s = s.strip()
+            if not s:
+                return False
+            try:
+                float(s)
+                return True
+            except ValueError:
+                return False
 
         prompt = prompt.strip() or tag_prompt
         seed = int(seed) % SEED_MAX
@@ -794,7 +807,8 @@ class TIPOScript(scripts.Script):
                         # normalized_user_tags_for_category = {normalize_tag(t) for t in org_tag_map.get(cate, [])} # Removed
                         for tag_item in tags_or_str:
                             if normalize_tag(tag_item) not in all_normalized_user_tags: # Changed to global set
-                                accumulated_tags_set.add(tag_item) # Add original tag_item
+                                if tag_item not in BANNED_STRING_TOKENS and not is_numeric_only_string(tag_item):
+                                    accumulated_tags_set.add(tag_item) # Add original tag_item
 
                 # Decide which NL content to use from this iteration's findings
                 # Store NL from the first iteration only, prioritize 'extended'
@@ -859,7 +873,8 @@ class TIPOScript(scripts.Script):
                     # normalized_user_tags_for_category = {normalize_tag(t) for t in org_tag_map.get(cate, [])} # Removed
                     for tag_item in tags_or_str:
                         if normalize_tag(tag_item) not in all_normalized_user_tags: # Changed to global set
-                            addon_tags_single_run.append(tag_item) # Add original tag_item
+                            if tag_item not in BANNED_STRING_TOKENS and not is_numeric_only_string(tag_item):
+                                addon_tags_single_run.append(tag_item) # Add original tag_item
 
             addon_nl_single_run = temp_nl_holder["extended"] or temp_nl_holder["generated"]
             addon = {"tags": addon_tags_single_run, "nl": addon_nl_single_run}
