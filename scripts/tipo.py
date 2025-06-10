@@ -635,6 +635,7 @@ class TIPOScript(scripts.Script):
         logger.info(f"Processing prompt: {prompt_preview}...")
         logger.info(f"Processing with seed: {seed}")
         prompt_without_extranet, res = parse_prompt(prompt) # This is from extra_networks, not the attention parser
+        logger.info(f"TIPO DEBUG: prompt_without_extranet received by TIPO script: '{prompt_without_extranet}'")
 
         # Use the local parse_prompt_attention for the main prompt
         prompt_parse_strength = _local_parse_prompt_attention(prompt_without_extranet, ignore_first_n_tags)
@@ -721,6 +722,14 @@ class TIPOScript(scripts.Script):
 
         org_tag_map = seperate_tags(all_tags)
 
+        all_normalized_user_tags = set()
+        if isinstance(org_tag_map, dict): # Ensure org_tag_map is a dict, as expected
+            for category_tags_list in org_tag_map.values():
+                if isinstance(category_tags_list, list): # Ensure tags are in a list
+                    for tag in category_tags_list:
+                        if isinstance(tag, str): # Ensure tag is a string
+                            all_normalized_user_tags.add(normalize_tag(tag))
+
         # Store the initial nl_prompt (text part, after attention stripping) for reuse in iterations
         initial_nl_text_for_kgen = nl_prompt
 
@@ -782,9 +791,9 @@ class TIPOScript(scripts.Script):
                         elif cate == "generated":
                             temp_generated_nl_this_iter = tags_or_str
                     elif isinstance(tags_or_str, list):
-                        normalized_user_tags_for_category = {normalize_tag(t) for t in org_tag_map.get(cate, [])}
+                        # normalized_user_tags_for_category = {normalize_tag(t) for t in org_tag_map.get(cate, [])} # Removed
                         for tag_item in tags_or_str:
-                            if normalize_tag(tag_item) not in normalized_user_tags_for_category:
+                            if normalize_tag(tag_item) not in all_normalized_user_tags: # Changed to global set
                                 accumulated_tags_set.add(tag_item) # Add original tag_item
 
                 # Decide which NL content to use from this iteration's findings
@@ -847,9 +856,9 @@ class TIPOScript(scripts.Script):
                     elif cate == "generated":
                         temp_nl_holder["generated"] = tags_or_str
                 elif isinstance(tags_or_str, list):
-                    normalized_user_tags_for_category = {normalize_tag(t) for t in org_tag_map.get(cate, [])}
+                    # normalized_user_tags_for_category = {normalize_tag(t) for t in org_tag_map.get(cate, [])} # Removed
                     for tag_item in tags_or_str:
-                        if normalize_tag(tag_item) not in normalized_user_tags_for_category:
+                        if normalize_tag(tag_item) not in all_normalized_user_tags: # Changed to global set
                             addon_tags_single_run.append(tag_item) # Add original tag_item
 
             addon_nl_single_run = temp_nl_holder["extended"] or temp_nl_holder["generated"]
