@@ -616,6 +616,7 @@ class TIPOScript(scripts.Script):
     ):
         normalize_tag = lambda t: t.strip().lower()
         BANNED_STRING_TOKENS = {"<|very_long|>", "<|long|>", "<|short|>", "<|very_short|>"}
+        NORMALIZED_BANNED_STRING_TOKENS = {normalize_tag(t) for t in BANNED_STRING_TOKENS}
 
         def is_numeric_only_string(s):
             if not isinstance(s, str):
@@ -777,6 +778,7 @@ class TIPOScript(scripts.Script):
                 if isinstance(models.text_model, torch.nn.Module):
                     models.text_model.to(devices.device)
 
+                tipo.BAN_TAGS = black_list # Re-apply before each runner call in loop
                 current_tag_map, _ = tipo_runner(
                     meta,
                     operations,
@@ -807,7 +809,7 @@ class TIPOScript(scripts.Script):
                         # normalized_user_tags_for_category = {normalize_tag(t) for t in org_tag_map.get(cate, [])} # Removed
                         for tag_item in tags_or_str:
                             if normalize_tag(tag_item) not in all_normalized_user_tags: # Changed to global set
-                                if tag_item not in BANNED_STRING_TOKENS and not is_numeric_only_string(tag_item):
+                                if normalize_tag(tag_item) not in NORMALIZED_BANNED_STRING_TOKENS and not is_numeric_only_string(tag_item):
                                     accumulated_tags_set.add(tag_item) # Add original tag_item
 
                 # Decide which NL content to use from this iteration's findings
@@ -873,7 +875,7 @@ class TIPOScript(scripts.Script):
                     # normalized_user_tags_for_category = {normalize_tag(t) for t in org_tag_map.get(cate, [])} # Removed
                     for tag_item in tags_or_str:
                         if normalize_tag(tag_item) not in all_normalized_user_tags: # Changed to global set
-                            if tag_item not in BANNED_STRING_TOKENS and not is_numeric_only_string(tag_item):
+                            if normalize_tag(tag_item) not in NORMALIZED_BANNED_STRING_TOKENS and not is_numeric_only_string(tag_item):
                                 addon_tags_single_run.append(tag_item) # Add original tag_item
 
             addon_nl_single_run = temp_nl_holder["extended"] or temp_nl_holder["generated"]
