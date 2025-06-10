@@ -676,7 +676,8 @@ class TIPOScript(scripts.Script):
         # The text part of `nl_prompt` used in `parse_tipo_request` should be the one without attention syntax.
         # The current logic for nl_prompt seems to reconstruct it from parsed parts.
 
-        black_list = [tag.strip() for tag in ban_tags.split(",") if tag.strip()]
+        # Ensure black_list contains lowercase tags for consistent processing
+        black_list = [tag.strip().lower() for tag in ban_tags.split(",") if tag.strip()]
         for part, strength in nl_prompt_parse_strength:
             nl_prompt += part
             if strength == 1:
@@ -689,8 +690,12 @@ class TIPOScript(scripts.Script):
                 items = ":".join(param.items)
                 rebuild_extranet += f" <{name}:{items}>"
 
-        black_list = [tag.strip() for tag in ban_tags.split(",") if tag.strip()]
-        tipo.BAN_TAGS = black_list
+        # black_list is already defined and normalized above.
+        # Convert black_list to a set for efficient lookup in the filtering stages below.
+        black_list_set = set(black_list)
+        # logger.info(f"TIPO DEBUG: black_list_set initialized as: {black_list_set}") # Removed this line
+
+        tipo.BAN_TAGS = black_list # This sets it for kgen library
         all_tags = []
         strength_map = {}
         break_map = set()
@@ -806,11 +811,13 @@ class TIPOScript(scripts.Script):
                         elif cate == "generated":
                             temp_generated_nl_this_iter = tags_or_str
                     elif isinstance(tags_or_str, list):
-                        # normalized_user_tags_for_category = {normalize_tag(t) for t in org_tag_map.get(cate, [])} # Removed
                         for tag_item in tags_or_str:
-                            if normalize_tag(tag_item) not in all_normalized_user_tags: # Changed to global set
-                                if normalize_tag(tag_item) not in NORMALIZED_BANNED_STRING_TOKENS and not is_numeric_only_string(tag_item):
-                                    accumulated_tags_set.add(tag_item) # Add original tag_item
+                            # Restore direct multi-condition check, remove detailed logging vars for this tag
+                            if normalize_tag(tag_item) not in all_normalized_user_tags and \
+                               normalize_tag(tag_item) not in NORMALIZED_BANNED_STRING_TOKENS and \
+                               not is_numeric_only_string(tag_item) and \
+                               normalize_tag(tag_item) not in black_list_set:
+                                accumulated_tags_set.add(tag_item) # Add original tag_item
 
                 # Decide which NL content to use from this iteration's findings
                 # Store NL from the first iteration only, prioritize 'extended'
@@ -872,10 +879,12 @@ class TIPOScript(scripts.Script):
                     elif cate == "generated":
                         temp_nl_holder["generated"] = tags_or_str
                 elif isinstance(tags_or_str, list):
-                    # normalized_user_tags_for_category = {normalize_tag(t) for t in org_tag_map.get(cate, [])} # Removed
                     for tag_item in tags_or_str:
-                        if normalize_tag(tag_item) not in all_normalized_user_tags: # Changed to global set
-                            if normalize_tag(tag_item) not in NORMALIZED_BANNED_STRING_TOKENS and not is_numeric_only_string(tag_item):
+                            # Restore direct multi-condition check, remove detailed logging vars for this tag
+                            if normalize_tag(tag_item) not in all_normalized_user_tags and \
+                               normalize_tag(tag_item) not in NORMALIZED_BANNED_STRING_TOKENS and \
+                               not is_numeric_only_string(tag_item) and \
+                               normalize_tag(tag_item) not in black_list_set:
                                 addon_tags_single_run.append(tag_item) # Add original tag_item
 
             addon_nl_single_run = temp_nl_holder["extended"] or temp_nl_holder["generated"]
