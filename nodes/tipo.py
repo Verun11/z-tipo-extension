@@ -358,6 +358,7 @@ class TIPO:
             "tags": [],
             "nl": "",
         }
+        normalized_added_tags = set() # Initialize set for deduplication
         for cate in tag_map.keys():
             if cate == "generated" and addon["nl"] == "":
                 addon["nl"] = tag_map[cate]
@@ -366,12 +367,21 @@ class TIPO:
                 extended = tag_map[cate]
                 addon["nl"] = extended
                 continue
-            if cate not in org_tag_map:
+            if cate not in org_tag_map: # Ensure category exists in original tags
                 continue
+
+            # Ensure org_tag_map[cate] is a list or set for "in" check, and default to empty list if not found
+            # This check might be overly cautious if seperate_tags always ensures valid lists for existing categories.
+            org_tags_in_cate = org_tag_map.get(cate)
+            if not isinstance(org_tags_in_cate, (list, set)):
+                org_tags_in_cate = [] # Treat as no original tags if format is unexpected
+
             for tag in tag_map[cate]:
-                if tag in org_tag_map[cate]:
-                    continue
-                addon["tags"].append(tag)
+                normalized_tag = tag.strip().lower()
+                # Condition: tag not in original category tags AND normalized tag not already added
+                if tag not in org_tags_in_cate and normalized_tag not in normalized_added_tags:
+                    addon["tags"].append(tag)
+                    normalized_added_tags.add(normalized_tag)
         addon = apply_strength(addon, strength_map, strength_map_nl)
         unformatted_prompt_by_tipo = (
             tags + ", " + ", ".join(addon["tags"]) + "\n" + addon["nl"]

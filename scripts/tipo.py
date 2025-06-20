@@ -871,6 +871,7 @@ class TIPOScript(scripts.Script):
             addon_tags_single_run = []
             addon_nl_single_run = ""
             temp_nl_holder = {"extended": "", "generated": ""}
+            normalized_addon_tags_so_far = set() # Initialize set for deduplication
 
             for cate, tags_or_str in tag_map.items():
                 if isinstance(tags_or_str, str):
@@ -880,12 +881,15 @@ class TIPOScript(scripts.Script):
                         temp_nl_holder["generated"] = tags_or_str
                 elif isinstance(tags_or_str, list):
                     for tag_item in tags_or_str:
+                            normalized_tag = normalize_tag(tag_item)
                             # Restore direct multi-condition check, remove detailed logging vars for this tag
-                            if normalize_tag(tag_item) not in all_normalized_user_tags and \
-                               normalize_tag(tag_item) not in NORMALIZED_BANNED_STRING_TOKENS and \
+                            if normalized_tag not in all_normalized_user_tags and \
+                               normalized_tag not in NORMALIZED_BANNED_STRING_TOKENS and \
                                not is_numeric_only_string(tag_item) and \
-                               normalize_tag(tag_item) not in black_list_set:
+                               normalized_tag not in black_list_set and \
+                               normalized_tag not in normalized_addon_tags_so_far: # New deduplication check
                                 addon_tags_single_run.append(tag_item) # Add original tag_item
+                                normalized_addon_tags_so_far.add(normalized_tag) # Add to set for future checks
 
             addon_nl_single_run = temp_nl_holder["extended"] or temp_nl_holder["generated"]
             addon = {"tags": addon_tags_single_run, "nl": addon_nl_single_run}
