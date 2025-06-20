@@ -374,16 +374,18 @@ class TIPOScript(scripts.Script):
 
         aspect_ratio_place_holder = gr.Number(value=1.0, visible=False)
 
+        prompt_output_textbox = self.prompt_area[is_img2img * 2] # Main prompt area for txt2img or img2img
+
         prompt_gen.click(
             self.prompt_gen_only,
             inputs=[
-                self.tag_prompt_area[is_img2img],
-                self.prompt_area[is_img2img * 2 + 1],
+                self.tag_prompt_area[is_img2img], # Main TIPO tag input
+                self.prompt_area[is_img2img * 2 + 1], # TIPO NL prompt input
                 aspect_ratio_place_holder,
                 seed_num_input,
                 tag_length_radio,
-                min_tags_slider, # New
-                max_tags_slider, # New
+                min_tags_slider,
+                max_tags_slider,
                 nl_length_radio,
                 ban_tags_textbox,
                 format_dropdown,
@@ -395,11 +397,14 @@ class TIPOScript(scripts.Script):
                 model_dropdown,
                 gguf_use_cpu,
                 no_formatting,
-                self.tag_prompt_area[is_img2img],
+                self.tag_prompt_area[is_img2img], # Fallback tag prompt input for _process
             ],
             outputs=[
-                self.prompt_area[is_img2img * 2],
-            ],
+                prompt_output_textbox,
+            ]
+        ).then(
+            fn=None,
+            _js=f"(value) => {{ const textarea = gradioApp().querySelector('#{prompt_output_textbox.elem_id}'); if (textarea && typeof updateInput === 'function') {{ updateInput(textarea); }} else if (textarea) {{ const event = new Event('input', {{ bubbles: true, cancelable: true }}); textarea.dispatchEvent(event); }} }}"
         )
 
         self.infotext_fields = [
