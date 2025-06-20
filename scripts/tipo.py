@@ -367,7 +367,7 @@ class TIPOScript(scripts.Script):
                             ignore_first_n_tags_slider = gr.Slider(
                                 label="Ignore First N Tags",
                                 minimum=0,
-                                maximum=50,
+                                maximum=90,
                                 step=1,
                                 value=0,
                             )
